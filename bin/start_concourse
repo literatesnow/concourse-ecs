@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Web
+# export FILE_1_PATH=/concourse-keys/tsa_host_key
+# export FILE_1_CONTENTS=='-----BEGIN RSA PRIVATE KEY-----'
+# export CONCOURSE_TSA_HOST_KEY=/concourse-keys/tsa_host_key
+
+# export FILE_2_PATH=/concourse-keys/authorized_worker_keys
+# export FILE_2_CONTENTS='ssh-rsa ...'
+# export CONCOURSE_TSA_AUTHORIZED_KEYS=/concourse-keys/authorized_worker_keys
+
+# export FILE_3_PATH=/concourse-keys/session_signing_key
+# export FILE_3_CONTENTS='-----BEGIN RSA PRIVATE KEY-----'
+# export CONCOURSE_SESSION_SIGNING_KEY=/concourse-keys/session_signing_key
+
+# export CONCOURSE_PEER_URL='http://{{ECS_HOST_IP}}:1000'
+# export CONCOURSE_TSA_PEER_IP='{{ECS_HOST_IP}}'
+# export SUBST_1=CONCOURSE_PEER_URL
+# export SUBST_2=CONCOURSE_TSA_PEER_IP
+
+# Worker
+# export FILE_1_PATH=/concourse-keys/tsa_host_key.pub
+# export FILE_1_CONTENTS='ssh-rsa ...'
+# export CONCOURSE_TSA_PUBLIC_KEY=/concourse-keys/tsa_host_key.pub
+
+# export FILE_2_PATH=/concourse-keys/worker_key
+# export FILE_2_CONTENTS='-----BEGIN RSA PRIVATE KEY-----'
+# export CONCOURSE_TSA_WORKER_PRIVATE_KEY=/concourse-keys/worker_key
+
+# export CONCOURSE_PEER_IP='{{ECS_HOST_IP}}'
+# export SUBST_1=CONCOURSE_PEER_IP
+
+write_files_from_env() {
+  local I=1
+
+  while true; do
+    local FP=FILE_${I}_PATH
+    local FC=FILE_${I}_CONTENTS
+    local FILE_PATH=${!FP}
+    local FILE_CONTENTS=${!FC}
+
+    [ -z "$FILE_PATH" ] && break
+
+    unset "$FP"
+    unset "$FC"
+
+    if [ -n "$FILE_CONTENTS" -a ! -e "$FILE_PATH" ]; then
+      echo "[$I] Writing: $FILE_PATH (${#FILE_PATH} bytes)"
+      echo "$FILE_CONTENTS" > "$FILE_PATH"
+    fi
+
+    ((I++))
+  done
+}
+
+subst_env() {
+  local ECS_HOST_IP=$(curl --connect-timeout 10 --silent --fail 'http://169.254.169.254/latest/meta-data/local-ipv4')
+  if [ -z "$ECS_HOST_IP" ]; then
+    echo "Unknown ECS_HOST_IP, setting to default"
+    ECS_HOST_IP=127.0.0.1
+  fi
+
+  local I=1
+
+  while true; do
+    local K=SUBST_${I}
+    local KEY=${!K}
+    local VALUE=${!KEY}
+
+    [ -z "$VALUE" ] && break
+
+    unset "$KEY"
+
+    VALUE=$(echo "$VALUE" | sed -e "s/{{ECS_HOST_IP}}/$ECS_HOST_IP/g")
+
+    echo "$KEY=$VALUE"
+    export $KEY=$VALUE
+
+    ((I++))
+  done
+}
+
+write_files_from_env
+subst_env
+
+/usr/local/bin/concourse "$@"
